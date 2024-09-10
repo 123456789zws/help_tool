@@ -10,6 +10,9 @@ from Crypto.Cipher import DES
 from Crypto.Util.Padding import unpad
 from PyQt5.QtCore import QThread, pyqtSignal
 from Crypto.Cipher import AES
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
 
 class WorkerThread(QThread):
     message_changed = pyqtSignal(str)
@@ -26,7 +29,7 @@ class WorkerThread(QThread):
         self.text_know_type = text_know_type
         self.is_use_cbc = False
 
-    def is_valid_json(self, json_string) :
+    def is_valid_json(self, json_string):
 
         try:
             # 尝试将字符串解析为 JSON 对象
@@ -367,11 +370,107 @@ class WorkerThread(QThread):
 
         return list(strings)
 
+    def extract_max_multiple_of_4_substring(self, s):
+        length = len(s)
+        max_substring = ""
+
+        # 找到最大的长度为4的倍数的子串
+        for i in range(length // 4):
+            current_length = (i + 1) * 4
+            substring = s[:current_length]
+            if len(substring) == current_length:
+                max_substring = substring
+
+        return max_substring
+
     def find_matching_plaintext(self, dump_file, target_str, algo_input, use_hmac):
+        all_files = dump_file.get('all_files')
+        dump_file = dump_file.get('strings')
 
         """在内存转储文件中搜索匹配的明文或密钥"""
 
         target_str = self.detect_format_and_convert_to_binary(target_str)
+
+        if algo_input == 'rsa证书导出':
+
+            strings = self.process_memory_data(all_files, 1024, b'M[A-Za-z0-9+/=\s]{128,}', 128)
+
+            isfind = False
+            self.message_totle.emit(len(strings))
+            for i, key in enumerate(strings):
+                if (i + 1) % max(1, len(strings) // 100) == 0 or i == len(strings) - 1:
+                    self.message_log.emit(i + 1)  # 批量更新进度条
+
+                # 原始二进制数据
+                binary_data = key
+                # 解码为字符串
+                text = binary_data.decode('latin1')
+                # 使用正则表达式去除尾部的空白字符
+                if not re.search(r'[\s]', text):
+                    text = self.extract_max_multiple_of_4_substring(text)
+
+                else:
+                    text = re.sub(r'[\s]+$', '', text)
+                text = text.encode('latin1')
+
+                # 尝试将数据作为公钥加载
+                try:
+                    public_key = serialization.load_pem_public_key(
+                        b'-----BEGIN PUBLIC KEY-----\n' + text + b'\n-----END PUBLIC KEY-----'
+                    )
+                    if isinstance(public_key, rsa.RSAPublicKey):
+                        isfind = True
+                        self.send("\n这是一个有效的 pem 公钥。")
+                        self.send(text)
+                    continue
+                except:
+
+                    pass  # 如果公钥加载失败，继续尝试私钥
+
+                    # 尝试将数据作为私钥加载
+                try:
+                    private_key = serialization.load_pem_private_key(
+                        b'-----BEGIN RSA PRIVATE KEY-----\n' + text + b'\n-----END RSA PRIVATE KEY-----',
+                        password=None  # 如果私钥有密码保护，提供密码
+                    )
+                    if isinstance(private_key, rsa.RSAPrivateKey):
+                        isfind = True
+                        self.send("\n这是一个有效的 pem 私钥。")
+                        self.send(text)
+
+                except:
+
+                    pass
+            if isfind:
+                return True
+        if algo_input == '明文搜索':
+            isfind = False
+            self.message_totle.emit(len(dump_file))
+            for i, key in enumerate(dump_file):
+                if (i + 1) % max(1, len(dump_file) // 100) == 0 or i == len(dump_file) - 1:
+                    self.message_log.emit(i + 1)  # 批量更新进度条
+
+                try:
+                    if self.text_know.encode('utf-8') in key or self.text_know.encode('gbk') in key:
+
+                        self.send("\n找到明文串\n" + key.decode('utf-8'))
+                        self.send(f"md5值：{hashlib.md5(key).hexdigest()}")
+                        self.send(f"sha1值：{hashlib.sha1(key).hexdigest()}")
+                        self.send(f"sha256值：{hashlib.sha256(key).hexdigest()}")
+                        isfind = True
+
+                except UnicodeDecodeError:
+                    try:
+                            self.send("\n找到明文串(gbk编码)\n" + key.decode('gbk'))
+                            self.send(f"md5值：{hashlib.md5(key).hexdigest()}")
+                            self.send(f"sha1值：{hashlib.sha1(key).hexdigest()}")
+                            self.send(f"sha256值：{hashlib.sha256(key).hexdigest()}")
+                            isfind = True
+                    except:
+                        pass
+
+            if isfind:
+                return True
 
         if algo_input == 'aes':
             pattern16 = re.compile(rb'(?=(.{16}))')
@@ -485,60 +584,43 @@ class WorkerThread(QThread):
         if algo_input in hashlib.algorithms_available:
 
             strings = dump_file  # 提取较长的可打印字符串，包括中文字符
+            stringslist = []
+
+            for s in strings:
+                try:
+                    if self.text_know_type == 'json格式':
+                        if not self.is_valid_json(s.decode()):
+                            continue
+                    stringslist.append(s.decode('utf-8'))
+                except UnicodeDecodeError:
+                    try:
+                        if self.text_know_type == 'json格式':
+                            if not self.is_valid_json(s.decode('gbk')):
+                                continue
+                        stringslist.append(s.decode('gbk'))
+                    except UnicodeDecodeError:
+                        continue
 
             if not use_hmac:
 
                 if self.text_know:
-                    self.message_totle.emit(len(strings))
-                    for i, decoded_str in enumerate(strings):
+                    known_messagelist = []
+                    for mm in stringslist:
+                        if self.text_know in mm:
+                            known_messagelist.append(mm)
 
-                        try:
-                            decoded_str = decoded_str.decode('utf-8')
-                            if self.text_know_type == 'json格式':
-                                if not self.is_valid_json(decoded_str):
-                                    continue
-                            if self.text_know not in decoded_str:
-                                continue
-                        except UnicodeDecodeError:
-                            try:
-                                decoded_str = decoded_str.decode('gbk')
-                                if self.text_know_type == 'json格式':
-                                    if not self.is_valid_json(decoded_str):
-                                        continue
-                                if self.text_know not in decoded_str:
-                                    continue
-                            except:
-                                continue
-                        except:
-                            continue
-
-                        if (i + 1) % max(1, len(strings) // 100) == 0 or i == len(strings) - 1:
+                    self.message_totle.emit(len(known_messagelist))
+                    for i, decoded_str in enumerate(known_messagelist):
+                        if (i + 1) % max(1, len(known_messagelist) // 20) == 0 or i == len(known_messagelist) - 1:
                             self.message_log.emit(i + 1)  # 批量更新进度条
 
                         if self.compute_hash(decoded_str, algo_input) == target_str:
                             self.send(f"找到匹配的明文：{decoded_str}")
                             return True
                 else:
-                    self.message_totle.emit(len(strings))
-                    for i, decoded_str in enumerate(strings):
-
-                        try:
-                            decoded_str = decoded_str.decode('utf-8')
-                            if self.text_know_type == 'json格式':
-                                if not self.is_valid_json(decoded_str):
-                                    continue
-                        except UnicodeDecodeError:
-                            try:
-                                decoded_str = decoded_str.decode('gbk')
-                                if self.text_know_type == 'json格式':
-                                    if not self.is_valid_json(decoded_str):
-                                        continue
-                            except:
-                                continue
-                        except:
-                            continue
-
-                        if (i + 1) % max(1, len(strings) // 100) == 0 or i == len(strings) - 1:
+                    self.message_totle.emit(len(stringslist))
+                    for i, decoded_str in enumerate(stringslist):
+                        if (i + 1) % max(1, len(stringslist) // 20) == 0 or i == len(stringslist) - 1:
                             self.message_log.emit(i + 1)  # 批量更新进度条
 
                         if self.compute_hash(decoded_str, algo_input) == target_str:
@@ -548,29 +630,10 @@ class WorkerThread(QThread):
                 if not self.text_know:
                     self.message_totle.emit(len(strings))
                     for i, key in enumerate(strings):
-
-                        if (i + 1) % max(1, len(strings) // 100) == 0 or i == len(strings) - 1:
+                        if (i + 1) % max(1, len(strings) // 20) == 0 or i == len(strings) - 1:
                             self.message_log.emit(i + 1)  # 批量更新进度条
 
-                        for known_message in strings:
-
-                            try:
-                                known_message = known_message.decode('utf-8')
-                                if self.text_know_type == 'json格式':
-                                    if not self.is_valid_json(known_message):
-                                        continue
-
-                            except UnicodeDecodeError:
-                                try:
-                                    known_message = known_message.decode('gbk')
-                                    if self.text_know_type == 'json格式':
-                                        if not self.is_valid_json(known_message):
-                                            continue
-                                except:
-                                    continue
-                            except:
-                                continue
-
+                        for known_message in stringslist:
                             # 尝试提取的字符串作为密钥，使用已知的消息进行 HMAC 并与目标 HMAC 值比较
                             computed_hmac = self.compute_hmac(known_message, key,
                                                               algo_input)  # 消息是 known_message，密钥是 decoded_str
@@ -579,42 +642,24 @@ class WorkerThread(QThread):
                                 self.send(f"找到匹配的明文：{known_message}")
                                 return True
                 else:
+                    known_messagelist = []
+                    for mm in stringslist:
+                        if self.text_know in mm:
+                            known_messagelist.append(mm)
 
                     self.message_totle.emit(len(strings))
                     for i, key in enumerate(strings):
 
-                        if (i + 1) % max(1, len(strings) // 100) == 0 or i == len(strings) - 1:
+                        if (i + 1) % max(1, len(strings) // 20) == 0 or i == len(strings) - 1:
                             self.message_log.emit(i + 1)  # 批量更新进度条
 
-                        for known_messagelistss in stringslist:
-
-                            try:
-                                known_messagelistss = known_messagelistss.decode('utf-8')
-                                if self.text_know_type == 'json格式':
-                                    if not self.is_valid_json(known_messagelistss):
-                                        continue
-                                if self.text_know not in known_messagelistss:
-                                    continue
-                            except UnicodeDecodeError:
-                                try:
-                                    known_messagelistss = known_messagelistss.decode('gbk')
-                                    if self.text_know_type == 'json格式':
-                                        if not self.is_valid_json(known_messagelistss):
-                                            continue
-                                    if self.text_know not in known_messagelistss:
-                                        continue
-                                except:
-                                    continue
-                            except:
-                                continue
-
+                        for known_messagelistss in known_messagelist:
                             computed_hmac = self.compute_hmac(known_messagelistss, key,
                                                               algo_input)  # 消息是 known_message，密钥是 decoded_str
                             if computed_hmac == target_str:
                                 self.send(f"找到匹配的密钥：{key}")
                                 self.send(f"找到匹配的明文：{known_messagelistss}")
                                 return True
-
         return None
 
     def send(self, message):
