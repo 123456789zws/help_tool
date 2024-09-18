@@ -5,6 +5,8 @@ import hmac
 import io
 import json
 import re
+import threading
+
 from Crypto.Cipher import DES3
 from Crypto.Cipher import DES
 from Crypto.Util.Padding import unpad
@@ -12,6 +14,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from Crypto.Cipher import AES
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from gmssl.sm4 import CryptSM4, SM4_DECRYPT
 
 
 class WorkerThread(QThread):
@@ -29,6 +32,7 @@ class WorkerThread(QThread):
         self.text_know_type = text_know_type
         self.is_use_cbc = False
 
+
     def is_valid_json(self, json_string):
 
         try:
@@ -44,7 +48,6 @@ class WorkerThread(QThread):
         # 如果符合 hex 格式且长度为偶数（每2个字符表示一个字节）
         if hex_pattern.match(s) and len(s) % 2 == 0:
             try:
-                print('hex')
                 return binascii.unhexlify(s)
 
             except (binascii.Error, ValueError):
@@ -54,14 +57,110 @@ class WorkerThread(QThread):
         try:
             base64_bytes = base64.b64decode(s, validate=True)
             if base64.b64encode(base64_bytes).decode('utf-8') == s:
-                print('base64')
                 return base64_bytes
         except (binascii.Error, ValueError):
             pass
 
         # 默认将其视为明文并转为二进制
-        print('utf-8')
         return s.encode('utf-8')
+
+    def sm4_decrypt_ecb(self, key, ciphertext):
+        try:
+            crypt_sm4 = CryptSM4(padding_mode=0)  # 默认填充为”3-PKCS7“
+            crypt_sm4.set_key(key, SM4_DECRYPT)
+            data = crypt_sm4.crypt_ecb(ciphertext)  # bytes类型
+            if not data:
+                return False
+        except:
+            return False
+
+        try:
+            padding = 'pkcs7'
+            data = unpad(data, AES.block_size)
+            data = data.decode('utf-8')
+            if self.text_know_type == 'json格式':
+                if not self.is_valid_json(data):
+                    raise ValueError()
+            if self.text_know and not (self.text_know in data):
+                raise ValueError()
+
+            self.send(f'模式：sm4_ebc_{padding}')
+            self.send(f'明文：{data}')
+            self.send(f'key(二进制)：{key}')
+            return True
+        except:
+            pass
+        try:
+            padding = 'zero'
+            data = data.rstrip(b'\0')
+            data = data.decode('utf-8')
+            if self.text_know_type == 'json格式':
+                if not self.is_valid_json(data):
+                    raise ValueError()
+            if self.text_know and not (self.text_know in data):
+                raise ValueError()
+            self.send(f'模式：sm4_ebc_{padding}')
+            self.send(f'明文：{data}')
+            self.send(f'key(二进制)：{key}')
+            return True
+        except:
+            return False
+
+    def sm4_decrypt_cbc(self, key, ciphertext, iv):
+        try:
+
+            crypt_sm4 = CryptSM4(padding_mode=0)
+            crypt_sm4.set_key(key, SM4_DECRYPT)
+            data = crypt_sm4.crypt_cbc(iv, ciphertext)  #  bytes类型
+            if not data:
+                return False
+
+        except:
+            return False
+
+        try:
+            padding = 'pkcs7'
+
+            data = unpad(data, AES.block_size)
+            key.decode()
+            data = data.decode('utf-8')
+            if self.text_know_type == 'json格式':
+                if not self.is_valid_json(data):
+                    raise ZeroDivisionError()
+            if self.text_know and not (self.text_know in data):
+                raise ZeroDivisionError("除数不能为零")
+            self.is_use_cbc = True
+            self.send(f'模式：sm4_cbc_{padding}')
+            self.send(f'明文：{data}')
+            self.send(f'key(二进制)：{key}')
+            self.send(f'iv（二进制）：{iv}')
+            return True
+        except ZeroDivisionError as e:
+            self.is_use_cbc = True
+        except:
+            pass
+
+        try:
+            padding = 'zero'
+            data = data.rstrip(b'\0')
+            data = data.decode('utf-8')
+            if self.text_know_type == 'json格式':
+                if not self.is_valid_json(data):
+                    raise ZeroDivisionError()
+            if self.text_know and not (self.text_know in data):
+                raise ZeroDivisionError("除数不能为零")
+            self.is_use_cbc = True
+            self.send(f'模式：sm4_cbc_{padding}')
+            self.send(f'明文：{data}')
+            self.send(f'key(二进制)：{key}')
+            self.send(f'iv（二进制）：{iv}')
+
+            return True
+        except ZeroDivisionError as e:
+            self.is_use_cbc = True
+        except:
+            pass
+
 
     def aes_decrypt_ecb(self, key, ciphertext):
         try:
@@ -154,6 +253,8 @@ class WorkerThread(QThread):
             self.is_use_cbc = True
         except:
             pass
+
+
 
     #
 
@@ -384,6 +485,7 @@ class WorkerThread(QThread):
         return max_substring
 
     def find_matching_plaintext(self, dump_file, target_str, algo_input, use_hmac):
+
         all_files = dump_file.get('all_files')
         dump_file = dump_file.get('strings')
 
@@ -391,9 +493,40 @@ class WorkerThread(QThread):
 
         target_str = self.detect_format_and_convert_to_binary(target_str)
 
+        if algo_input == 'sm4':
+            pattern16 = re.compile(br'(?=(.{16}))')
+            strings16 = []
+            for item in dump_file:
+                if len(item) >= 16:
+                    strings16.extend([match.group(1) for match in pattern16.finditer(item)])
+            self.message_totle.emit(len(strings16))
+            for i, key in enumerate(strings16):
+                if (i + 1) % max(1, len(strings16) // 100) == 0 or i == len(strings16) - 1:
+                    self.message_log.emit(i + 1)  # 批量更新进度条
+
+                ciphertext_ecb = self.sm4_decrypt_ecb(key, target_str)
+                if ciphertext_ecb:
+                    return True
+
+                self.is_use_cbc = False
+                self.sm4_decrypt_cbc(key, target_str,
+                                     b'0123456789abcdef')
+                if self.is_use_cbc:
+                    self.send('开始推理iv')
+
+                    for iv in strings16:
+
+                        ciphertext_cbc = self.sm4_decrypt_cbc(key, target_str,
+                                                              iv, )
+                        if ciphertext_cbc:
+                            return True
+
+
+            pass
+
         if algo_input == 'rsa证书导出':
 
-            strings = self.process_memory_data(all_files, 1024, b'M[A-Za-z0-9+/=\s]{128,}', 128)
+            strings = self.process_memory_data(all_files, 1024, rb'M[A-Za-z0-9+/=\s]{128,}', 128)
 
             isfind = False
             self.message_totle.emit(len(strings))
@@ -420,7 +553,7 @@ class WorkerThread(QThread):
                     )
                     if isinstance(public_key, rsa.RSAPublicKey):
                         isfind = True
-                        self.send("\n这是一个有效的 pem 公钥。")
+                        self.send("\n这是一个有效的 RSA 公钥。")
                         self.send(text)
                     continue
                 except:
@@ -435,7 +568,7 @@ class WorkerThread(QThread):
                     )
                     if isinstance(private_key, rsa.RSAPrivateKey):
                         isfind = True
-                        self.send("\n这是一个有效的 pem 私钥。")
+                        self.send("\n这是一个有效的 RSA 私钥。")
                         self.send(text)
 
                 except:
@@ -616,6 +749,7 @@ class WorkerThread(QThread):
 
                         if self.compute_hash(decoded_str, algo_input) == target_str:
                             self.send(f"找到匹配的明文：{decoded_str}")
+
                             return True
                 else:
                     self.message_totle.emit(len(stringslist))
@@ -625,6 +759,7 @@ class WorkerThread(QThread):
 
                         if self.compute_hash(decoded_str, algo_input) == target_str:
                             self.send(f"找到匹配的明文：{decoded_str}")
+
                             return True
             else:
                 if not self.text_know:
@@ -665,13 +800,15 @@ class WorkerThread(QThread):
     def send(self, message):
         self.message_changed.emit(f"{message}")
 
+
+
     def run(self):
+
 
         dump_file = self.file_path
         target_hash = self.text_unknow
         # 输入哈希算法类型，允许包含 HMAC 前缀
         algo_input = self.hash_name.strip().lower()
-        print(algo_input)
 
         # 检查是否使用 HMAC
         use_hmac = algo_input.startswith("hmac")
@@ -684,9 +821,9 @@ class WorkerThread(QThread):
 
         if not result:
 
-            self.send("未找到匹配的明文或密钥。")
+            self.send(f"*******未找到算法{self.hash_name}匹配的明文或密钥*******\n")
 
         else:
-            self.send("匹配成功")
+            self.send(f"*******算法{self.hash_name}匹配成功*******\n")
 
         self.message_end.emit()

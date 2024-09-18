@@ -1,19 +1,27 @@
 import ctypes
+
+import threading
 from ctypes import wintypes
 
+import keyboard
 import psutil
+from PyQt5.QtCore import QThread
+
 from PyQt5.QtGui import QIntValidator
-from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QStackedWidget, \
-    QPushButton, QGridLayout, QButtonGroup, QGroupBox, QRadioButton, QTextEdit, QProgressBar, QAction
+from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QComboBox, QStackedWidget, \
+    QGridLayout, QButtonGroup, QGroupBox, QRadioButton, QTextEdit, QProgressBar, QAction, QApplication
 import CustomTextEdit
 import WorkerThread
 import Part_Thread
+from ShortcutDialog import ShortcutDialog
 
 PROCESS_ALL_ACCESS = 0x001F0FFF
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
 THREAD_SUSPEND_RESUME = 0x0002
 TH32CS_SNAPTHREAD = 0x00000004
+
+from PyQt5.QtWidgets import QDialog, QLineEdit, QPushButton, QVBoxLayout
 
 
 class THREADENTRY32(ctypes.Structure):
@@ -35,9 +43,12 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         # 设置窗口标题和大小
-
+        self.tt = None
+        self.HOTKEY_ID = 885
+        self.shortcut_key = 'Ctrl+Shift+G'
         self.setWindowTitle("推理助手")
         self.setGeometry(100, 100, 800, 600)
+        self.thread_list = []
         self.pid = None
         self.file_path = None
         self.hash_name = None
@@ -69,7 +80,7 @@ class MainWindow(QMainWindow):
 
         # 创建按钮来触发文件选择对话框
         # self.button = QPushButton("选择模型文件", self)
-        self.button2 = QPushButton("加载模型", self)
+        self.button2 = QPushButton(f"加载模型({self.shortcut_key})", self)
 
         # self.button.clicked.connect(self.open_file_dialog)
         self.button2.clicked.connect(self.loadfile)
@@ -94,7 +105,6 @@ class MainWindow(QMainWindow):
 
         self.groupBox3 = QGroupBox(self)
         self.groupBox3.setTitle("猜测可能的明文格式")
-
         self.radio_button1 = QRadioButton("MD5", self)
         self.radio_button2 = QRadioButton("SHA1", self)
         self.radio_button3 = QRadioButton("SHA256", self)
@@ -117,6 +127,8 @@ class MainWindow(QMainWindow):
 
         self.radio_button17 = QRadioButton("rsa证书导出", self)
         self.radio_button18 = QRadioButton("明文搜索", self)
+        self.radio_button19 = QRadioButton("SM4", self)
+        self.radio_button20 = QRadioButton("全部算法(不含HMAC)", self)
 
         self.radio_button12.toggled.connect(self.on_radio_button_toggled)
         self.radio_button13.toggled.connect(self.on_radio_button_toggled)
@@ -135,6 +147,8 @@ class MainWindow(QMainWindow):
         self.QRadioButton_layout2.addWidget(self.radio_button9, 0, 2)
         self.QRadioButton_layout2.addWidget(self.radio_button17, 0, 3)
         self.QRadioButton_layout2.addWidget(self.radio_button18)
+        self.QRadioButton_layout2.addWidget(self.radio_button19)
+        self.QRadioButton_layout2.addWidget(self.radio_button20)
 
         self.QRadioButton_layout3.addWidget(self.radio_button10, 0, 0)
         self.QRadioButton_layout3.addWidget(self.radio_button11, 0, 1)
@@ -155,6 +169,8 @@ class MainWindow(QMainWindow):
         self.button_group.addButton(self.radio_button9)
         self.button_group.addButton(self.radio_button17)
         self.button_group.addButton(self.radio_button18)
+        self.button_group.addButton(self.radio_button19)
+        self.button_group.addButton(self.radio_button20)
         self.button_group.addButton(self.radio_button14)
 
         self.radio_button4.toggled.connect(self.on_radio_button_toggled_suanfa)
@@ -162,6 +178,8 @@ class MainWindow(QMainWindow):
         self.radio_button6.toggled.connect(self.on_radio_button_toggled_suanfa)
         self.radio_button17.toggled.connect(self.on_radio_button_toggled_suanfa)
         self.radio_button18.toggled.connect(self.on_radio_button_toggled_suanfa)
+        self.radio_button19.toggled.connect(self.on_radio_button_toggled_suanfa)
+        self.radio_button20.toggled.connect(self.on_radio_button_toggled_suanfa)
 
         self.radio_button1.toggled.connect(self.on_radio_button_toggled_suanfa)
         self.radio_button2.toggled.connect(self.on_radio_button_toggled_suanfa)
@@ -218,11 +236,25 @@ class MainWindow(QMainWindow):
         self.radio_button10.setChecked(True)
         self.radio_button13.setChecked(True)
 
+        self.register_hotkeys()
+
         # 创建菜单栏
         self.create_menu()
 
         # 创建状态栏
         self.statusBar().showMessage("准备就绪")
+
+    def register_hotkeys(self):
+
+        keyboard.unhook_all()
+        keyboard.add_hotkey(self.shortcut_key, self.on_hotkey)
+
+    def on_hotkey(self):
+
+        self.button2.click()
+
+    def closeEvent(self, event):
+        keyboard.unhook_all()
 
     def start_worker(self):
 
@@ -246,7 +278,6 @@ class MainWindow(QMainWindow):
 
         if selected_button:
             self.hash_name = selected_button.text()
-            print("选中的按钮文本:", selected_button.text())  # 打印选中按钮的文本
         else:
             self.statusBar().showMessage("没有选中的按钮", 5000)
             return
@@ -254,35 +285,67 @@ class MainWindow(QMainWindow):
         if self.task_button.text() == "开始推理":
             self.task_button.setText('停止推理')
         else:
-            if self.worker:
-                print(f"是运行:{self.worker.isRunning()}")
 
+            if self.worker:
                 self.worker.terminate()
 
-                print(f"是运行:{self.worker.isRunning()}")
+            for thread in self.thread_list:
+                thread.terminate()
             self.progress_bar.hide()
             self.task_button.setText('开始推理')
-
             return
 
-        self.worker = WorkerThread.WorkerThread(self.file_path, self.hash_name, self.text_knowedit.toPlainText(),
-                                                self.text_unknowedit.toPlainText(),
-                                                self.button_group2.checkedButton().text())
-        print((self.hash_name, self.text_knowedit.toPlainText(),
-               self.text_unknowedit.toPlainText(), self.button_group2.checkedButton().text()))
+        if self.hash_name == "全部算法(不含HMAC)":
+            self.tt = threading.Thread(target=self.worker_thread_list, )
+            self.tt.start()
 
-        self.worker.message_changed.connect(self.append_message)
-        self.worker.message_end.connect(self.worker_end)
-        self.worker.message_log.connect(self.worker_log)
-        self.worker.message_totle.connect(self.worker_totle)
+        else:
+            self.worker = WorkerThread.WorkerThread(self.file_path, self.hash_name, self.text_knowedit.toPlainText(),
+                                                    self.text_unknowedit.toPlainText(),
+                                                    self.button_group2.checkedButton().text())
 
-        self.progress_bar.show()
+            self.worker.message_changed.connect(self.append_message)
+            self.worker.message_end.connect(self.worker_end)
+            self.worker.message_log.connect(self.worker_log)
+            self.worker.message_totle.connect(self.worker_totle)
 
-        self.worker.start()
+            self.progress_bar.show()
+
+            self.worker.start()
+
+    def worker_thread_list(self):
+        self.thread_list = []
+        hash_name_list = ['MD5', "SHA1", "SHA256", "AES", "DES", "3DES", "SM3",
+                          "SM4"]
+        self.task_button.setEnabled(False)
+        for name in hash_name_list:
+            self.append_message(f'开启{name}推理线程\n')
+            worker = WorkerThread.WorkerThread(self.file_path, name,
+                                               self.text_knowedit.toPlainText(),
+                                               self.text_unknowedit.toPlainText(),
+                                               self.button_group2.checkedButton().text(), self)
+
+            worker.message_changed.connect(self.append_message)
+            worker.message_end.connect(self.worker_end)
+            worker.message_log.connect(self.worker_log)
+            worker.message_totle.connect(self.worker_totle)
+            self.progress_bar.show()
+            worker.start()
+
+            self.thread_list.append(worker)
+        self.task_button.setEnabled(True)
 
     def worker_end(self):
+        if self.thread_list:
+            if len(self.thread_list) < 8:
+                return
+            for thread in self.thread_list:
+                if thread.isRunning():
+                    return
+
         self.task_button.setEnabled(True)
         self.progress_bar.hide()
+
         self.progress_bar.setValue(self.progress_bar.maximum())
         self.progress_bar.setValue(0)
         self.task_button.setText('开始推理')
@@ -311,6 +374,11 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        # 添加快捷键设置功能
+        set_shortcut_action = QAction("加载模型的全局快捷键", self)
+        set_shortcut_action.triggered.connect(self.show_shortcut_dialog)
+        file_menu.addAction(set_shortcut_action)
+
         # 创建 "帮助" 菜单
         help_menu = menu_bar.addMenu("帮助")
 
@@ -319,6 +387,16 @@ class MainWindow(QMainWindow):
         about_action.setStatusTip("关于这个程序")
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
+
+    def show_shortcut_dialog(self):
+        dialog = ShortcutDialog(self)
+        dialog.shortcut_edit.setText(f'当前快捷键: {self.shortcut_key}')
+        if dialog.exec_() == QDialog.Accepted:
+            # 如果对话框被接受，则设置新快捷键
+            if dialog.shortcut_info:
+                self.shortcut_key = dialog.shortcut_info
+                self.register_hotkeys()
+                self.button2.setText(f"加载模型({self.shortcut_key})")
 
     def show_about_dialog(self):
         # 显示关于对话框
@@ -392,7 +470,7 @@ class MainWindow(QMainWindow):
         try:
             snapshot = ctypes.windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
             if snapshot == -1:
-                self.send("无法创建线程快照。")
+                self.append_message("无法创建线程快照。")
                 return []
 
             thread_entry = THREADENTRY32()
@@ -409,7 +487,7 @@ class MainWindow(QMainWindow):
             ctypes.windll.kernel32.CloseHandle(snapshot)
             return threads
         except Exception as e:
-            self.send(f"获取线程句柄时出错: {e}")
+            self.append_message(f"获取线程句柄时出错: {e}")
             return []
 
         # 打开进程
@@ -429,8 +507,8 @@ class MainWindow(QMainWindow):
         # 读取内存
 
     def loadfile(self):
-        if self.button2.text() == "加载模型":
-            self.button2.setText('停止加载模型')
+        if self.button2.text() == f"加载模型({self.shortcut_key})":
+            self.button2.setText(f'停止加载模型({self.shortcut_key})')
         else:
             if self.Part_worker:
                 print(f"是运行:{self.Part_worker.isRunning()}")
@@ -440,7 +518,7 @@ class MainWindow(QMainWindow):
 
                 print(f"是运行:{self.Part_worker.isRunning()}")
             self.progress_bar.hide()
-            self.button2.setText('加载模型')
+            self.button2.setText(f'加载模型({self.shortcut_key})')
 
             return
 
@@ -469,7 +547,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         self.progress_bar.setValue(self.progress_bar.maximum())
         self.progress_bar.setValue(0)
-        self.button2.setText('加载模型')
+        self.button2.setText(f'加载模型({self.shortcut_key})')
         if value:
             self.file_path = value
             self.text_messageedit.append(f"成功！模型加载成功")
