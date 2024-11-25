@@ -111,7 +111,7 @@ def sm4_decrypt_cbc(key, ciphertext, iv, text_know, text_know_type):
         if text_know_type == '明文格式':
             for i in range(4):
                 try:
-                    data[16 + i:].decode()
+                    data.decode() if len(data) <= 20 else data[16 + i:].decode()
                     is_use_cbc = True
                     break
                 except UnicodeDecodeError:
@@ -147,7 +147,7 @@ def sm4_decrypt_cbc(key, ciphertext, iv, text_know, text_know_type):
         if text_know_type == '明文格式':
             for i in range(4):
                 try:
-                    data[16 + i:].decode()
+                    data.decode() if len(data) <= 20 else data[16 + i:].decode()
                     is_use_cbc = True
                     break
                 except UnicodeDecodeError:
@@ -192,7 +192,6 @@ def aes_decrypt_ecb(key, ciphertext, text_know, text_know_type):
         if text_know and text_know.encode() not in data and text_know.encode(
                 "gbk") not in data:
             raise ValueError()
-
         try:
             return f'模式：aes_ebc_{padding}' + '\n' + f'明文(utf-8)：{data.decode()}' + '\n' + f'key(二进制)：{key}'
         except UnicodeDecodeError:
@@ -237,7 +236,7 @@ def aes_decrypt_cbc(key, ciphertext, iv, text_know, text_know_type):
         if text_know_type == '明文格式':
             for i in range(4):
                 try:
-                    data[16 + i:].decode()
+                    data.decode() if len(data) <= 20 else data[16 + i:].decode()
                     is_use_cbc = True
                     break
                 except UnicodeDecodeError:
@@ -274,7 +273,7 @@ def aes_decrypt_cbc(key, ciphertext, iv, text_know, text_know_type):
         if text_know_type == '明文格式':
             for i in range(4):
                 try:
-                    data[16 + i:].decode()
+                    data.decode() if len(data) <= 20 else data[16 + i:].decode()
                     is_use_cbc = True
                     break
                 except UnicodeDecodeError:
@@ -369,7 +368,7 @@ def des_decrypt_cbc(key, ciphertext, iv, text_know, text_know_type):
         if text_know_type == '明文格式':
             for i in range(4):
                 try:
-                    data[16 + i:].decode()
+                    data.decode() if len(data) <= 12 else data[8 + i:].decode()
                     is_use_cbc = True
                     break
                 except UnicodeDecodeError:
@@ -403,7 +402,7 @@ def des_decrypt_cbc(key, ciphertext, iv, text_know, text_know_type):
         if text_know_type == '明文格式':
             for i in range(4):
                 try:
-                    data[16 + i:].decode()
+                    data.decode() if len(data) <= 12 else data[8 + i:].decode()
                     is_use_cbc = True
                     break
                 except UnicodeDecodeError:
@@ -494,7 +493,7 @@ def triple_des_decrypt_cbc(key, ciphertext, iv, text_know, text_know_type):
         if text_know_type == '明文格式':
             for i in range(4):
                 try:
-                    data[16 + i:].decode()
+                    data.decode() if len(data) <= 12 else data[8 + i:].decode()
                     is_use_cbc = True
                     break
                 except UnicodeDecodeError:
@@ -529,7 +528,7 @@ def triple_des_decrypt_cbc(key, ciphertext, iv, text_know, text_know_type):
         if text_know_type == '明文格式':
             for i in range(4):
                 try:
-                    data[16 + i:].decode()
+                    data.decode() if len(data) <= 12 else data[8 + i:].decode()
                     is_use_cbc = True
                     break
                 except UnicodeDecodeError:
@@ -916,11 +915,11 @@ def find_matching_plaintext(dump_file, target_str, algo_input, use_hmac, text_kn
                                total=count_4_totle,
                                desc="Processing items",
                                file=output_stream):
+
                 if result:
-                    pool.terminate()  # 关闭进程池
-                    pool.join()  # 等待所有进程结束
                     send(result, queue)
-                    return queue.put(algo_input + '_1')
+                    queue.put(algo_input + '_1')
+                    return
 
     if algo_input == 'rsa证书导出':
         isfind = False
@@ -969,10 +968,9 @@ def find_matching_plaintext(dump_file, target_str, algo_input, use_hmac, text_kn
                                desc="Processing items",
                                file=output_stream):
                 if result:
-                    pool.terminate()  # 关闭进程池
-                    pool.join()  # 等待所有进程结束
                     send(result, queue)
-                    return queue.put(algo_input + '_1')
+                    queue.put(algo_input + '_1')
+                    return
 
     if algo_input == 'des':
 
@@ -987,10 +985,9 @@ def find_matching_plaintext(dump_file, target_str, algo_input, use_hmac, text_kn
                                desc="Processing items",
                                file=output_stream):
                 if result:
-                    pool.terminate()  # 关闭进程池
-                    pool.join()  # 等待所有进程结束
                     send(result, queue)
-                    return queue.put(algo_input + '_1')
+                    queue.put(algo_input + '_1')
+                    return
 
     if algo_input == '3des':
         args = ((i.group(), pattern8, pattern_common_8, pattern16, pattern_common_16, pattern24, pattern_common_24,
@@ -1005,10 +1002,9 @@ def find_matching_plaintext(dump_file, target_str, algo_input, use_hmac, text_kn
                                desc="Processing items",
                                file=output_stream):
                 if result:
-                    pool.terminate()  # 关闭进程池
-                    pool.join()  # 等待所有进程结束
                     send(result, queue)
-                    return queue.put(algo_input + '_1')
+                    queue.put(algo_input + '_1')
+                    return
 
     if algo_input in hashlib.algorithms_available or is_all_hash:
 
@@ -1026,10 +1022,9 @@ def find_matching_plaintext(dump_file, target_str, algo_input, use_hmac, text_kn
                                        desc="Processing items",
                                        file=output_stream):
                         if result:
-                            pool.terminate()  # 关闭进程池
-                            pool.join()  # 等待所有进程结束
                             send(result, queue)
-                            return queue.put(algo_input + '_1')
+                            queue.put(algo_input + '_1')
+                            return
 
         else:
             if not use_hmac:
@@ -1043,10 +1038,9 @@ def find_matching_plaintext(dump_file, target_str, algo_input, use_hmac, text_kn
                                        desc="Processing items",
                                        file=output_stream):
                         if result:
-                            pool.terminate()  # 关闭进程池
-                            pool.join()  # 等待所有进程结束
                             send(result, queue)
-                            return queue.put(algo_input + '_1')
+                            queue.put(algo_input + '_1')
+                            return
 
             else:
                 args = ((i.group(), pattern_all, text_know, text_know_type, algo_input, target_str) for
@@ -1060,11 +1054,11 @@ def find_matching_plaintext(dump_file, target_str, algo_input, use_hmac, text_kn
                                        total=count_4_totle,
                                        desc="Processing items",
                                        file=output_stream):
+
                         if result:
-                            pool.terminate()  # 关闭进程池
-                            pool.join()  # 等待所有进程结束
                             send(result, queue)
-                            return queue.put('hmac' + algo_input + '_1')
+                            queue.put('hmac' + algo_input + '_1')
+                            return
 
     return queue.put('hmac' + algo_input + '_0' if use_hmac else algo_input + '_0')
 
@@ -1110,28 +1104,34 @@ class WorkerAllThread(QThread):
         try:
             if self.processes_list:
                 for processes in self.processes_list:
-                    if processes:
+                    if processes.is_alive():
                         parent_process = psutil.Process(processes.pid)
                         children = parent_process.children(recursive=True)  # 使用 recursive=True 以获取所有子孙进程
                         # 先终止子进程
                         for child in children:
                             if child:
-                                child.kill()
+                                try:
+                                    child.kill()
+                                except Exception as e:
+                                    print(e)
                         processes.terminate()
                         processes.join()
 
+            if self.p and self.p.is_alive():
+                parent_process = psutil.Process(self.p.pid)
+                children = parent_process.children(recursive=True)  # 使用 recursive=True 以获取所有子孙进程
+                # 先终止子进程
+                for child in children:
+                    if child:
+                        if child:
+                            try:
+                                child.kill()
+                            except Exception as e:
+                                print(e)
+                self.p.terminate()
+                self.p.join()
         except Exception as e:
             print(e)
-
-        if self.p:
-            parent_process = psutil.Process(self.p.pid)
-            children = parent_process.children(recursive=True)  # 使用 recursive=True 以获取所有子孙进程
-            # 先终止子进程
-            for child in children:
-                if child:
-                    child.terminate()  # 或使用 child.kill() 强制终止
-            self.p.terminate()
-            self.p.join()
 
     def run(self):
         file_size = os.path.getsize(self.file_path.get('all_files_path'))
@@ -1175,17 +1175,44 @@ class WorkerAllThread(QThread):
                 else:
                     if result.split('_')[1] == '1':
                         self.send(f"*******算法{result.split('_')[0].upper()}匹配成功*******\n")
-                        self.processes_list[
+                        processes = self.processes_list[
                             hash_name_list.index("哈希系列") if result.split('_')[0] in ["md5", "sha1", "sha256",
                                                                                          "sm3"] else hash_name_list.index(
-                                result.split('_')[0].upper())].join()
+                                result.split('_')[0].upper())]
+
+                        if processes.is_alive():
+                            parent_process = psutil.Process(processes.pid)
+                            children = parent_process.children(recursive=True)  # 使用 recursive=True 以获取所有子孙进程
+                            # 先终止子进程
+                            for child in children:
+                                if child:
+                                    try:
+                                        child.kill()
+                                    except Exception as e:
+                                        print(e)
+                            processes.terminate()
+                            processes.join()
+
                     else:
                         self.send(
                             f"*******未找到算法{"HASH系列" if result.split('_')[0] in ["md5", "sha1", "sha256", "sm3"] else result.split('_')[0].upper()}匹配的明文或密钥*******\n")
-                        self.processes_list[
+                        processes = self.processes_list[
                             hash_name_list.index("哈希系列") if result.split('_')[0] in ["md5", "sha1", "sha256",
                                                                                          "sm3"] else hash_name_list.index(
-                                result.split('_')[0].upper())].join()
+                                result.split('_')[0].upper())]
+
+                        if processes.is_alive():
+                            parent_process = psutil.Process(processes.pid)
+                            children = parent_process.children(recursive=True)  # 使用 recursive=True 以获取所有子孙进程
+                            # 先终止子进程
+                            for child in children:
+                                if child:
+                                    try:
+                                        child.kill()
+                                    except Exception as e:
+                                        print(e)
+                            processes.terminate()
+                            processes.join()
 
             self.message_end.emit(0)
 
@@ -1221,10 +1248,34 @@ class WorkerAllThread(QThread):
 
                     if result.split('_')[1] == '1':
                         self.send(f"*******算法{result.split('_')[0]}匹配成功*******\n")
-                        self.p.join()
+                        if self.p.is_alive():
+                            parent_process = psutil.Process(self.p.pid)
+                            children = parent_process.children(recursive=True)  # 使用 recursive=True 以获取所有子孙进程
+                            # 先终止子进程
+                            for child in children:
+                                if child:
+                                    if child:
+                                        try:
+                                            child.kill()
+                                        except Exception as e:
+                                            print(e)
+                            self.p.terminate()
+                            self.p.join()
 
                     else:
                         self.send(f"*******未找到算法{result.split('_')[0]}匹配的明文或密钥*******\n")
-                        self.p.join()
+                        if self.p.is_alive():
+                            parent_process = psutil.Process(self.p.pid)
+                            children = parent_process.children(recursive=True)  # 使用 recursive=True 以获取所有子孙进程
+                            # 先终止子进程
+                            for child in children:
+                                if child:
+                                    if child:
+                                        try:
+                                            child.kill()
+                                        except Exception as e:
+                                            print(e)
+                            self.p.terminate()
+                            self.p.join()
 
             self.message_end.emit(0)
